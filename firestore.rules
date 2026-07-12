@@ -84,7 +84,14 @@ service cloud.firestore {
         request.resource.data.edited == false &&
         request.resource.data.autoRegistered is bool &&
         (!request.resource.data.autoRegistered || request.resource.data.type == 'exit') &&
-        request.resource.data.outOfRadius is bool;
+        request.resource.data.outOfRadius is bool &&
+        (
+          request.resource.data.outOfRadius == false ||
+          (
+            request.resource.data.justification is string &&
+            request.resource.data.justification.size() > 0
+          )
+        );
     }
 
     function punchAdminCreateIsValid() {
