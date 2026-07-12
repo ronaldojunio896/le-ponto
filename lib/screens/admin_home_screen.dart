@@ -50,7 +50,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     final notification = context.read<NotificationService>();
     _punchAlertSub = attendance.watchNewPunchesSince(since).listen((punches) {
       for (final punch in punches) {
-        if (punch.employeeId == widget.user.id || !_seenPunchAlerts.add(punch.id)) {
+        if (punch.employeeId == widget.user.id ||
+            !_seenPunchAlerts.add(punch.id)) {
           continue;
         }
         notification.showPunchAlert(
@@ -59,7 +60,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         );
         if (!mounted) continue;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${punch.employeeName} bateu ${punch.type.label}.')),
+          SnackBar(
+              content:
+                  Text('${punch.employeeName} bateu ${punch.type.label}.')),
         );
       }
     });
@@ -90,10 +93,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.leaderboard), label: 'Ranking'),
+          NavigationDestination(
+              icon: Icon(Icons.leaderboard), label: 'Ranking'),
           NavigationDestination(icon: Icon(Icons.group), label: 'Equipe'),
           NavigationDestination(icon: Icon(Icons.fact_check), label: 'Pontos'),
-          NavigationDestination(icon: Icon(Icons.summarize), label: 'Relatorios'),
+          NavigationDestination(
+              icon: Icon(Icons.summarize), label: 'Relatorios'),
           NavigationDestination(icon: Icon(Icons.store), label: 'Loja'),
         ],
       ),
@@ -114,7 +119,8 @@ class _DashboardTab extends StatelessWidget {
       stream: configService.watchConfig(),
       builder: (context, snapshot) {
         final config = snapshot.data ?? RemoteAppConfig.defaults();
-        final weekNumber = WorkdaySummary.configuredPaymentWeekNumber(now, config);
+        final weekNumber =
+            WorkdaySummary.configuredPaymentWeekNumber(now, config);
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -124,6 +130,8 @@ class _DashboardTab extends StatelessWidget {
               weekNumber: weekNumber,
               config: config,
             ),
+            const SizedBox(height: 16),
+            _TeamStatusOverview(config: config),
             const SizedBox(height: 16),
             _TodayPunchesPreview(),
           ],
@@ -162,14 +170,18 @@ class _AdminRanking extends StatelessWidget {
                 .where((user) => !user.isAdmin && user.active)
                 .toList();
             final rows = users.map((user) {
-              final userPunches = punches.where((punch) => punch.employeeId == user.id).toList();
+              final userPunches = punches
+                  .where((punch) => punch.employeeId == user.id)
+                  .toList();
               return _RankingRowData(
                 user: user,
                 overtimeSeconds: _weekOvertime(userPunches, config),
               );
             }).toList()
               ..sort((a, b) => b.overtimeSeconds.compareTo(a.overtimeSeconds));
-            final maxSeconds = rows.isEmpty ? 1 : rows.first.overtimeSeconds.clamp(1, 1 << 31).toInt();
+            final maxSeconds = rows.isEmpty
+                ? 1
+                : rows.first.overtimeSeconds.clamp(1, 1 << 31).toInt();
             return Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -192,7 +204,8 @@ class _AdminRanking extends StatelessWidget {
                     if (rows.isEmpty)
                       const Text('Nenhum funcionario ativo.')
                     else
-                      ...rows.map((row) => _RankingBar(row: row, maxSeconds: maxSeconds)),
+                      ...rows.map((row) =>
+                          _RankingBar(row: row, maxSeconds: maxSeconds)),
                   ],
                 ),
               ),
@@ -211,10 +224,231 @@ class _AdminRanking extends StatelessWidget {
     }
     var total = 0;
     for (final entry in byDay.entries) {
-      total += WorkdaySummary(day: entry.key, punches: entry.value, config: config)
-          .overtimeSeconds();
+      total +=
+          WorkdaySummary(day: entry.key, punches: entry.value, config: config)
+              .overtimeSeconds();
     }
     return total;
+  }
+}
+
+class _TeamStatusOverview extends StatelessWidget {
+  const _TeamStatusOverview({required this.config});
+
+  final RemoteAppConfig config;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final todayStart = WorkdaySummary.dayStart(now);
+    final todayEnd = WorkdaySummary.dayEnd(todayStart);
+    final attendance = context.watch<AttendanceService>();
+    final firestore = context.watch<FirebaseFirestore>();
+
+    return StreamBuilder<List<Punch>>(
+      stream: attendance.watchAllPunches(todayStart, todayEnd),
+      builder: (context, punchSnapshot) {
+        final punches = punchSnapshot.data ?? [];
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: firestore.collection('users').orderBy('name').snapshots(),
+          builder: (context, userSnapshot) {
+            final users = (userSnapshot.data?.docs ?? [])
+                .map(AppUser.fromDoc)
+                .where((user) =>
+                    user.active &&
+                    (!user.isAdmin ||
+                        punches.any((punch) => punch.employeeId == user.id)))
+                .toList();
+            final rows = users.map((user) {
+              final userPunches = punches
+                  .where((punch) => punch.employeeId == user.id)
+                  .toList();
+              final summary = WorkdaySummary(
+                  day: todayStart, punches: userPunches, config: config);
+              return _TeamStatusRowData(user: user, summary: summary, now: now);
+            }).toList()
+              ..sort((a, b) {
+                final status = a.priority.compareTo(b.priority);
+                if (status != 0) return status;
+                return a.user.name.compareTo(b.user.name);
+              });
+
+            final workingCount =
+                rows.where((row) => row.summary.isWorking).length;
+            final lunchCount = rows.where((row) => row.summary.onLunch).length;
+            final missingCount =
+                rows.where((row) => row.summary.entry == null).length;
+
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.groups),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Equipe agora',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _StatusPill(
+                            icon: Icons.play_circle,
+                            label: 'Trabalhando',
+                            value: workingCount),
+                        _StatusPill(
+                            icon: Icons.restaurant,
+                            label: 'Almoco',
+                            value: lunchCount),
+                        _StatusPill(
+                            icon: Icons.pending_actions,
+                            label: 'Sem entrada',
+                            value: missingCount),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (rows.isEmpty)
+                      const Text('Nenhum funcionario ativo.')
+                    else
+                      ...rows.map((row) => _TeamStatusTile(row: row)),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill(
+      {required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.primaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 6),
+          Text('$label: $value'),
+        ],
+      ),
+    );
+  }
+}
+
+class _TeamStatusTile extends StatelessWidget {
+  const _TeamStatusTile({required this.row});
+
+  final _TeamStatusRowData row;
+
+  @override
+  Widget build(BuildContext context) {
+    final formatter = DateFormat('HH:mm', 'pt_BR');
+    final theme = Theme.of(context);
+    final entry = row.summary.entry;
+    final exit = row.summary.exit;
+    final latest =
+        row.summary.punches.isEmpty ? null : row.summary.punches.last;
+    final detail = row.summary.isWorking
+        ? 'Entrada ${formatter.format(entry!.serverTime)}'
+        : row.summary.onLunch
+            ? 'Saiu para almoco ${formatter.format(row.summary.lunchOut!.serverTime)}'
+            : row.summary.isClosed
+                ? 'Saida ${formatter.format(exit!.serverTime)}'
+                : latest == null
+                    ? 'Ainda nao bateu entrada'
+                    : '${latest.type.label} ${formatter.format(latest.serverTime)}';
+    final overtime = row.summary.overtimeSeconds(now: row.now);
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading:
+          UserAvatar(name: row.user.name, photoBase64: row.user.photoBase64),
+      title: Text(row.user.name),
+      subtitle: Text(detail),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(row.icon, color: row.color(theme), size: 18),
+              const SizedBox(width: 4),
+              Text(row.label),
+            ],
+          ),
+          if (overtime > 0) Text('+${formatSeconds(overtime, compact: true)}'),
+        ],
+      ),
+    );
+  }
+}
+
+class _TeamStatusRowData {
+  const _TeamStatusRowData(
+      {required this.user, required this.summary, required this.now});
+
+  final AppUser user;
+  final WorkdaySummary summary;
+  final DateTime now;
+
+  int get priority {
+    if (summary.isWorking) return 0;
+    if (summary.onLunch) return 1;
+    if (summary.entry == null) return 2;
+    if (summary.isClosed) return 3;
+    return 4;
+  }
+
+  IconData get icon {
+    if (summary.isWorking) return Icons.play_circle;
+    if (summary.onLunch) return Icons.restaurant;
+    if (summary.entry == null) return Icons.pending_actions;
+    if (summary.isClosed) return Icons.check_circle;
+    return Icons.warning_amber;
+  }
+
+  String get label {
+    if (summary.isWorking) return 'Trabalhando';
+    if (summary.onLunch) return 'Almoco';
+    if (summary.entry == null) return 'Sem entrada';
+    if (summary.isClosed) return 'Saiu';
+    return 'Pendente';
+  }
+
+  Color color(ThemeData theme) {
+    final colors = theme.colorScheme;
+    if (summary.isWorking) return colors.primary;
+    if (summary.onLunch) return colors.secondary;
+    if (summary.entry == null) return colors.error;
+    if (summary.isClosed) return colors.tertiary;
+    return colors.outline;
   }
 }
 
@@ -225,7 +459,9 @@ class _TodayPunchesPreview extends StatelessWidget {
     final todayStart = WorkdaySummary.dayStart(now);
     final formatter = DateFormat('HH:mm', 'pt_BR');
     return StreamBuilder<List<Punch>>(
-      stream: context.watch<AttendanceService>().watchAllPunches(todayStart, WorkdaySummary.dayEnd(todayStart)),
+      stream: context
+          .watch<AttendanceService>()
+          .watchAllPunches(todayStart, WorkdaySummary.dayEnd(todayStart)),
       builder: (context, snapshot) {
         final punches = snapshot.data ?? [];
         return Card(
@@ -234,7 +470,8 @@ class _TodayPunchesPreview extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Pontos de hoje', style: Theme.of(context).textTheme.titleLarge),
+                Text('Pontos de hoje',
+                    style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
                 if (punches.isEmpty)
                   const Text('Nenhum ponto registrado hoje.')
@@ -242,9 +479,12 @@ class _TodayPunchesPreview extends StatelessWidget {
                   ...punches.take(6).map(
                         (punch) => ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: Icon(punch.autoRegistered ? Icons.near_me : Icons.access_time),
+                          leading: Icon(punch.autoRegistered
+                              ? Icons.near_me
+                              : Icons.access_time),
                           title: Text(punch.employeeName),
-                          subtitle: Text('${punch.type.label} - ${formatter.format(punch.serverTime)}'),
+                          subtitle: Text(
+                              '${punch.type.label} - ${formatter.format(punch.serverTime)}'),
                         ),
                       ),
               ],
@@ -261,7 +501,11 @@ class _EmployeesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final users = context.watch<FirebaseFirestore>().collection('users').orderBy('name').snapshots();
+    final users = context
+        .watch<FirebaseFirestore>()
+        .collection('users')
+        .orderBy('name')
+        .snapshots();
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -281,12 +525,14 @@ class _EmployeesTab extends StatelessWidget {
                 final user = AppUser.fromDoc(doc);
                 return Card(
                   child: ListTile(
-                    leading: UserAvatar(name: user.name, photoBase64: user.photoBase64),
+                    leading: UserAvatar(
+                        name: user.name, photoBase64: user.photoBase64),
                     title: Text(user.name),
                     subtitle: Text('${user.email} - ${user.role.name}'),
                     trailing: Switch(
                       value: user.active,
-                      onChanged: (value) => doc.reference.update({'active': value}),
+                      onChanged: (value) =>
+                          doc.reference.update({'active': value}),
                     ),
                   ),
                 );
@@ -314,28 +560,45 @@ class _EmployeesTab extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: name, decoration: const InputDecoration(labelText: 'Nome')),
+                TextField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: 'Nome')),
                 const SizedBox(height: 10),
-                TextField(controller: email, decoration: const InputDecoration(labelText: 'E-mail')),
+                TextField(
+                    controller: email,
+                    decoration: const InputDecoration(labelText: 'E-mail')),
                 const SizedBox(height: 10),
-                TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Senha inicial')),
+                TextField(
+                    controller: password,
+                    obscureText: true,
+                    decoration:
+                        const InputDecoration(labelText: 'Senha inicial')),
                 const SizedBox(height: 10),
-                TextField(controller: rate, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Valor por hora')),
+                TextField(
+                    controller: rate,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                        const InputDecoration(labelText: 'Valor por hora')),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<UserRole>(
                   initialValue: role,
                   decoration: const InputDecoration(labelText: 'Tipo de conta'),
                   items: const [
-                    DropdownMenuItem(value: UserRole.employee, child: Text('Funcionario')),
-                    DropdownMenuItem(value: UserRole.admin, child: Text('Admin')),
+                    DropdownMenuItem(
+                        value: UserRole.employee, child: Text('Funcionario')),
+                    DropdownMenuItem(
+                        value: UserRole.admin, child: Text('Admin')),
                   ],
-                  onChanged: (value) => setDialogState(() => role = value ?? UserRole.employee),
+                  onChanged: (value) =>
+                      setDialogState(() => role = value ?? UserRole.employee),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar')),
             FilledButton(
               onPressed: saving
                   ? null
@@ -347,14 +610,18 @@ class _EmployeesTab extends StatelessWidget {
                               email: email.text,
                               password: password.text,
                               role: role,
-                              hourlyRate: double.tryParse(rate.text.replaceAll(',', '.')) ?? 0,
+                              hourlyRate: double.tryParse(
+                                      rate.text.replaceAll(',', '.')) ??
+                                  0,
                             );
                         if (context.mounted) Navigator.pop(context);
                       } catch (error) {
                         setDialogState(() => saving = false);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Nao foi possivel cadastrar: $error')),
+                            SnackBar(
+                                content:
+                                    Text('Nao foi possivel cadastrar: $error')),
                           );
                         }
                       }
@@ -379,7 +646,8 @@ class _PunchesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final start = WorkdaySummary.dayStart(now).subtract(const Duration(days: 7));
+    final start =
+        WorkdaySummary.dayStart(now).subtract(const Duration(days: 7));
     final end = WorkdaySummary.dayEnd(now);
     final formatter = DateFormat('dd/MM/yyyy HH:mm', 'pt_BR');
     return StreamBuilder<List<Punch>>(
@@ -411,7 +679,8 @@ class _PunchesTab extends StatelessWidget {
                                   : Icons.access_time,
                     ),
                     title: Text('${punch.employeeName} - ${punch.type.label}'),
-                    subtitle: Text('${formatter.format(punch.serverTime)} - ${punch.distanceMeters.toStringAsFixed(1)} m'),
+                    subtitle: Text(
+                        '${formatter.format(punch.serverTime)} - ${punch.distanceMeters.toStringAsFixed(1)} m'),
                     trailing: Wrap(
                       spacing: 4,
                       children: [
@@ -438,11 +707,19 @@ class _PunchesTab extends StatelessWidget {
   }
 
   Future<void> _showManualPunch(BuildContext context) async {
-    final usersSnapshot = await context.read<FirebaseFirestore>().collection('users').orderBy('name').get();
+    final usersSnapshot = await context
+        .read<FirebaseFirestore>()
+        .collection('users')
+        .orderBy('name')
+        .get();
     if (!context.mounted) return;
-    final users = usersSnapshot.docs.map(AppUser.fromDoc).where((user) => !user.isAdmin).toList();
+    final users = usersSnapshot.docs
+        .map(AppUser.fromDoc)
+        .where((user) => !user.isAdmin)
+        .toList();
     AppUser? selected = users.isNotEmpty ? users.first : null;
-    final date = TextEditingController(text: DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()));
+    final date = TextEditingController(
+        text: DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()));
     final justification = TextEditingController();
     var type = PunchType.entry;
     var saving = false;
@@ -458,29 +735,42 @@ class _PunchesTab extends StatelessWidget {
                 DropdownButtonFormField<AppUser>(
                   initialValue: selected,
                   decoration: const InputDecoration(labelText: 'Funcionario'),
-                  items: users.map((user) => DropdownMenuItem(value: user, child: Text(user.name))).toList(),
+                  items: users
+                      .map((user) =>
+                          DropdownMenuItem(value: user, child: Text(user.name)))
+                      .toList(),
                   onChanged: (value) => setDialogState(() => selected = value),
                 ),
                 const SizedBox(height: 10),
-                TextField(controller: date, decoration: const InputDecoration(labelText: 'Data e hora')),
+                TextField(
+                    controller: date,
+                    decoration:
+                        const InputDecoration(labelText: 'Data e hora')),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<PunchType>(
                   initialValue: type,
                   decoration: const InputDecoration(labelText: 'Tipo'),
-                  items: PunchType.values.map((value) => DropdownMenuItem(value: value, child: Text(value.label))).toList(),
-                  onChanged: (value) => setDialogState(() => type = value ?? PunchType.entry),
+                  items: PunchType.values
+                      .map((value) => DropdownMenuItem(
+                          value: value, child: Text(value.label)))
+                      .toList(),
+                  onChanged: (value) =>
+                      setDialogState(() => type = value ?? PunchType.entry),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: justification,
                   maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Justificativa obrigatoria'),
+                  decoration: const InputDecoration(
+                      labelText: 'Justificativa obrigatoria'),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar')),
             FilledButton(
               onPressed: saving
                   ? null
@@ -489,8 +779,11 @@ class _PunchesTab extends StatelessWidget {
                       if (employee == null) return;
                       setDialogState(() => saving = true);
                       try {
-                        final parsed = DateFormat('yyyy-MM-dd HH:mm').parse(date.text);
-                        await context.read<AttendanceService>().createManualPunch(
+                        final parsed =
+                            DateFormat('yyyy-MM-dd HH:mm').parse(date.text);
+                        await context
+                            .read<AttendanceService>()
+                            .createManualPunch(
                               employeeId: employee.id,
                               employeeName: employee.name,
                               serverTime: parsed,
@@ -502,7 +795,9 @@ class _PunchesTab extends StatelessWidget {
                         setDialogState(() => saving = false);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Nao foi possivel salvar: $error')),
+                            SnackBar(
+                                content:
+                                    Text('Nao foi possivel salvar: $error')),
                           );
                         }
                       }
@@ -521,7 +816,8 @@ class _PunchesTab extends StatelessWidget {
   }
 
   Future<void> _editPunch(BuildContext context, Punch punch) {
-    final date = TextEditingController(text: DateFormat('yyyy-MM-dd HH:mm').format(punch.serverTime));
+    final date = TextEditingController(
+        text: DateFormat('yyyy-MM-dd HH:mm').format(punch.serverTime));
     final justification = TextEditingController();
     var type = punch.type;
     return showDialog<void>(
@@ -532,24 +828,33 @@ class _PunchesTab extends StatelessWidget {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: date, decoration: const InputDecoration(labelText: 'Data e hora')),
+              TextField(
+                  controller: date,
+                  decoration: const InputDecoration(labelText: 'Data e hora')),
               const SizedBox(height: 10),
               DropdownButtonFormField<PunchType>(
                 initialValue: type,
                 decoration: const InputDecoration(labelText: 'Tipo'),
-                items: PunchType.values.map((value) => DropdownMenuItem(value: value, child: Text(value.label))).toList(),
-                onChanged: (value) => setDialogState(() => type = value ?? punch.type),
+                items: PunchType.values
+                    .map((value) => DropdownMenuItem(
+                        value: value, child: Text(value.label)))
+                    .toList(),
+                onChanged: (value) =>
+                    setDialogState(() => type = value ?? punch.type),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: justification,
                 maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Justificativa obrigatoria'),
+                decoration: const InputDecoration(
+                    labelText: 'Justificativa obrigatoria'),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar')),
             FilledButton(
               onPressed: () async {
                 final parsed = DateFormat('yyyy-MM-dd HH:mm').parse(date.text);
@@ -586,12 +891,15 @@ class _PunchesTab extends StatelessWidget {
               TextField(
                 controller: justification,
                 maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Justificativa obrigatoria'),
+                decoration: const InputDecoration(
+                    labelText: 'Justificativa obrigatoria'),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: deleting ? null : () => Navigator.pop(context), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: deleting ? null : () => Navigator.pop(context),
+                child: const Text('Cancelar')),
             FilledButton.icon(
               style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error,
@@ -611,7 +919,9 @@ class _PunchesTab extends StatelessWidget {
                         setDialogState(() => deleting = false);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Nao foi possivel excluir: $error')),
+                            SnackBar(
+                                content:
+                                    Text('Nao foi possivel excluir: $error')),
                           );
                         }
                       }
@@ -646,7 +956,11 @@ class _ReportsTabState extends State<_ReportsTab> {
     final now = DateTime.now();
     final weekStart = WorkdaySummary.paymentWeekStart(now);
     final nextWeek = WorkdaySummary.paymentWeekEnd(now);
-    final usersStream = context.watch<FirebaseFirestore>().collection('users').orderBy('name').snapshots();
+    final usersStream = context
+        .watch<FirebaseFirestore>()
+        .collection('users')
+        .orderBy('name')
+        .snapshots();
     final configService = context.watch<AppConfigService>();
 
     return StreamBuilder<RemoteAppConfig>(
@@ -659,11 +973,17 @@ class _ReportsTabState extends State<_ReportsTab> {
             StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: usersStream,
               builder: (context, snapshot) {
-                final users = (snapshot.data?.docs ?? []).map(AppUser.fromDoc).where((u) => !u.isAdmin).toList();
+                final users = (snapshot.data?.docs ?? [])
+                    .map(AppUser.fromDoc)
+                    .where((u) => !u.isAdmin)
+                    .toList();
                 return DropdownButtonFormField<AppUser>(
                   initialValue: _selected,
                   decoration: const InputDecoration(labelText: 'Funcionario'),
-                  items: users.map((u) => DropdownMenuItem(value: u, child: Text(u.name))).toList(),
+                  items: users
+                      .map((u) =>
+                          DropdownMenuItem(value: u, child: Text(u.name)))
+                      .toList(),
                   onChanged: (value) => setState(() => _selected = value),
                 );
               },
@@ -671,7 +991,9 @@ class _ReportsTabState extends State<_ReportsTab> {
             const SizedBox(height: 16),
             if (_selected != null)
               StreamBuilder<List<Punch>>(
-                stream: context.watch<AttendanceService>().watchPunchesForUser(_selected!.id, weekStart, nextWeek),
+                stream: context
+                    .watch<AttendanceService>()
+                    .watchPunchesForUser(_selected!.id, weekStart, nextWeek),
                 builder: (context, snapshot) {
                   final punches = snapshot.data ?? [];
                   final hourlyRate = _selected!.hourlyRate == 0
@@ -688,21 +1010,23 @@ class _ReportsTabState extends State<_ReportsTab> {
                       _SummaryCard(summary: summary),
                       const SizedBox(height: 12),
                       FilledButton.icon(
-                        onPressed: () => context.read<ReportService>().exportPdf(
-                              employeeName: _selected!.name,
-                              punches: punches,
-                              summary: summary,
-                            ),
+                        onPressed: () =>
+                            context.read<ReportService>().exportPdf(
+                                  employeeName: _selected!.name,
+                                  punches: punches,
+                                  summary: summary,
+                                ),
                         icon: const Icon(Icons.picture_as_pdf),
                         label: const Text('Exportar PDF'),
                       ),
                       const SizedBox(height: 8),
                       FilledButton.icon(
-                        onPressed: () => context.read<ReportService>().exportExcel(
-                              employeeName: _selected!.name,
-                              punches: punches,
-                              summary: summary,
-                            ),
+                        onPressed: () =>
+                            context.read<ReportService>().exportExcel(
+                                  employeeName: _selected!.name,
+                                  punches: punches,
+                                  summary: summary,
+                                ),
                         icon: const Icon(Icons.table_chart),
                         label: const Text('Exportar Excel'),
                       ),
@@ -748,7 +1072,8 @@ class _ReportsTabState extends State<_ReportsTab> {
               TextField(
                 controller: minutes,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Minutos aprovados'),
+                decoration:
+                    const InputDecoration(labelText: 'Minutos aprovados'),
               ),
               const SizedBox(height: 10),
               ListTile(
@@ -778,7 +1103,9 @@ class _ReportsTabState extends State<_ReportsTab> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar')),
             FilledButton(
               onPressed: () async {
                 await context.read<AttendanceService>().approveOvertime(
@@ -822,13 +1149,15 @@ class _SummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Resumo da semana', style: Theme.of(context).textTheme.titleLarge),
+            Text('Resumo da semana',
+                style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
             Text('Horas normais: ${_minutes(summary.normalMinutes)}'),
             Text('Horas extras liquidas: ${_minutes(summary.overtimeMinutes)}'),
             Text('Atrasos: ${_minutes(summary.lateMinutes)}'),
             Text('Saidas antecipadas: ${_minutes(summary.earlyLeaveMinutes)}'),
-            Text('Valor das horas extras: ${money.format(summary.amountToPay)}'),
+            Text(
+                'Valor das horas extras: ${money.format(summary.amountToPay)}'),
           ],
         ),
       ),
@@ -886,7 +1215,8 @@ class _StoreTabState extends State<_StoreTab> {
   @override
   Widget build(BuildContext context) {
     final firestore = context.watch<FirebaseFirestore>();
-    final storeRef = firestore.collection('stores').doc('le-racoes-sao-gabriel');
+    final storeRef =
+        firestore.collection('stores').doc('le-racoes-sao-gabriel');
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: storeRef.snapshots(),
       builder: (context, snapshot) {
@@ -899,7 +1229,8 @@ class _StoreTabState extends State<_StoreTab> {
                 onPressed: () async {
                   await storeRef.set({
                     'name': 'Le Racoes',
-                    'address': 'R. Anapurus, 242 - Lj 03 - Sao Gabriel, Belo Horizonte - MG, 31980-140',
+                    'address':
+                        'R. Anapurus, 242 - Lj 03 - Sao Gabriel, Belo Horizonte - MG, 31980-140',
                     'latitude': -19.8587,
                     'longitude': -43.9248,
                     'radiusMeters': 40,
@@ -929,13 +1260,15 @@ class _StoreTabState extends State<_StoreTab> {
             const SizedBox(height: 16),
             TextField(
               controller: _latitude,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
               decoration: const InputDecoration(labelText: 'Latitude'),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _longitude,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
               decoration: const InputDecoration(labelText: 'Longitude'),
             ),
             const SizedBox(height: 18),
@@ -953,9 +1286,11 @@ class _StoreTabState extends State<_StoreTab> {
               onPressed: () async {
                 await storeRef.set({
                   'name': 'Le Racoes',
-                  'address': 'R. Anapurus, 242 - Lj 03 - Sao Gabriel, Belo Horizonte - MG, 31980-140',
+                  'address':
+                      'R. Anapurus, 242 - Lj 03 - Sao Gabriel, Belo Horizonte - MG, 31980-140',
                   'latitude': double.parse(_latitude.text.replaceAll(',', '.')),
-                  'longitude': double.parse(_longitude.text.replaceAll(',', '.')),
+                  'longitude':
+                      double.parse(_longitude.text.replaceAll(',', '.')),
                   'radiusMeters': _radius.round(),
                   'coordinateNeedsReview': false,
                   'updatedAt': FieldValue.serverTimestamp(),
@@ -992,33 +1327,43 @@ class _StoreTabState extends State<_StoreTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Central remota', style: Theme.of(context).textTheme.titleLarge),
+                Text('Central remota',
+                    style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _hourlyRateDefault,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Valor padrao por hora'),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration:
+                      const InputDecoration(labelText: 'Valor padrao por hora'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _autoExitDistance,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Distancia para auto-saida (m)'),
+                  decoration: const InputDecoration(
+                      labelText: 'Distancia para auto-saida (m)'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _duplicateWindow,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Trava anti-duplicidade (segundos)'),
+                  decoration: const InputDecoration(
+                      labelText: 'Trava anti-duplicidade (segundos)'),
                 ),
                 const SizedBox(height: 16),
-                Text('Segunda a sexta', style: Theme.of(context).textTheme.titleMedium),
+                Text('Segunda a sexta',
+                    style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 _timeRow(
                   _weekdayStart,
                   _weekdayNoLunchExit,
                   _weekdayLunchExit,
-                  labels: const ['Entrada', 'Saida sem almoco', 'Saida com almoco'],
+                  labels: const [
+                    'Entrada',
+                    'Saida sem almoco',
+                    'Saida com almoco'
+                  ],
                 ),
                 const SizedBox(height: 16),
                 Text('Sabado', style: Theme.of(context).textTheme.titleMedium),
@@ -1079,22 +1424,31 @@ class _StoreTabState extends State<_StoreTab> {
   }
 
   void _loadRemoteConfig(RemoteAppConfig config) {
-    _hourlyRateDefault.text = config.hourlyRateDefault.toStringAsFixed(2).replaceAll('.', ',');
+    _hourlyRateDefault.text =
+        config.hourlyRateDefault.toStringAsFixed(2).replaceAll('.', ',');
     _autoExitDistance.text = config.autoExitDistanceMeters.toString();
     _duplicateWindow.text = config.duplicatePunchWindowSeconds.toString();
-    _weekdayStart.text = WorkdaySchedule.formatMinute(config.weekdaySchedule.startMinute);
-    _weekdayNoLunchExit.text = WorkdaySchedule.formatMinute(config.weekdaySchedule.noLunchExitMinute);
-    _weekdayLunchExit.text = WorkdaySchedule.formatMinute(config.weekdaySchedule.lunchExitMinute);
-    _saturdayStart.text = WorkdaySchedule.formatMinute(config.saturdaySchedule.startMinute);
-    _saturdayExit.text = WorkdaySchedule.formatMinute(config.saturdaySchedule.noLunchExitMinute);
-    _sundayStart.text = WorkdaySchedule.formatMinute(config.sundaySchedule.startMinute);
-    _sundayExit.text = WorkdaySchedule.formatMinute(config.sundaySchedule.noLunchExitMinute);
+    _weekdayStart.text =
+        WorkdaySchedule.formatMinute(config.weekdaySchedule.startMinute);
+    _weekdayNoLunchExit.text =
+        WorkdaySchedule.formatMinute(config.weekdaySchedule.noLunchExitMinute);
+    _weekdayLunchExit.text =
+        WorkdaySchedule.formatMinute(config.weekdaySchedule.lunchExitMinute);
+    _saturdayStart.text =
+        WorkdaySchedule.formatMinute(config.saturdaySchedule.startMinute);
+    _saturdayExit.text =
+        WorkdaySchedule.formatMinute(config.saturdaySchedule.noLunchExitMinute);
+    _sundayStart.text =
+        WorkdaySchedule.formatMinute(config.sundaySchedule.startMinute);
+    _sundayExit.text =
+        WorkdaySchedule.formatMinute(config.sundaySchedule.noLunchExitMinute);
     _configLoaded = true;
   }
 
   Future<void> _saveRemoteConfig(BuildContext context) async {
     final config = RemoteAppConfig(
-      hourlyRateDefault: double.parse(_hourlyRateDefault.text.replaceAll(',', '.')),
+      hourlyRateDefault:
+          double.parse(_hourlyRateDefault.text.replaceAll(',', '.')),
       autoExitDistanceMeters: int.parse(_autoExitDistance.text),
       duplicatePunchWindowSeconds: int.parse(_duplicateWindow.text),
       paymentWeekBaseNumber: 72,
@@ -1141,12 +1495,16 @@ class _RankingBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final factor = row.overtimeSeconds == 0 ? 0.04 : row.overtimeSeconds / maxSeconds;
+    final factor =
+        row.overtimeSeconds == 0 ? 0.04 : row.overtimeSeconds / maxSeconds;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          UserAvatar(name: row.user.name, photoBase64: row.user.photoBase64, radius: 18),
+          UserAvatar(
+              name: row.user.name,
+              photoBase64: row.user.photoBase64,
+              radius: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1154,7 +1512,9 @@ class _RankingBar extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text(row.user.name, overflow: TextOverflow.ellipsis)),
+                    Expanded(
+                        child: Text(row.user.name,
+                            overflow: TextOverflow.ellipsis)),
                     Text(formatSeconds(row.overtimeSeconds, compact: true)),
                   ],
                 ),
