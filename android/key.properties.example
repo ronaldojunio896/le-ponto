@@ -1,0 +1,4 @@
+storeFile=../leponto.jks
+storePassword=change-me
+keyAlias=leponto
+keyPassword=change-me

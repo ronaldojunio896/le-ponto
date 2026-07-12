@@ -1,0 +1,192 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function setupMissing() {
+      return !exists(/databases/$(database)/documents/system/setup);
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return signedIn() && userDoc().data.role == 'admin' && userDoc().data.active == true;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function userFieldsAreValid() {
+      return request.resource.data.keys().hasOnly([
+        'name',
+        'email',
+        'role',
+        'active',
+        'hourlyRate',
+        'createdAt'
+      ]) &&
+      request.resource.data.role in ['employee', 'admin'] &&
+      request.resource.data.active is bool &&
+      request.resource.data.createdAt == request.time;
+    }
+
+    function profilePhotoUpdateIsValid(userId) {
+      return isSelf(userId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'photoBase64',
+          'photoUpdatedAt'
+        ]) &&
+        request.resource.data.photoBase64 is string &&
+        request.resource.data.photoBase64.size() < 900000 &&
+        request.resource.data.photoUpdatedAt == request.time;
+    }
+
+    function firstAdminCreate(userId) {
+      return signedIn() &&
+        setupMissing() &&
+        request.auth.uid == userId &&
+        userFieldsAreValid() &&
+        request.resource.data.role == 'admin' &&
+        request.resource.data.active == true &&
+        request.resource.data.hourlyRate == 0;
+    }
+
+    function punchCreateIsValid() {
+      return signedIn() &&
+        request.resource.data.keys().hasOnly([
+          'employeeId',
+          'employeeName',
+          'type',
+          'storeId',
+          'latitude',
+          'longitude',
+          'accuracy',
+          'storeLatitude',
+          'storeLongitude',
+          'distanceMeters',
+          'radiusMeters',
+          'outOfRadius',
+          'justification',
+          'serverTime',
+          'edited',
+          'autoRegistered',
+          'createdAt'
+        ]) &&
+        request.resource.data.employeeId == request.auth.uid &&
+        request.resource.data.type in ['entry', 'lunchOut', 'lunchIn', 'exit'] &&
+        request.resource.data.serverTime == request.time &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.edited == false &&
+        request.resource.data.autoRegistered is bool &&
+        (!request.resource.data.autoRegistered || request.resource.data.type == 'exit') &&
+        request.resource.data.outOfRadius is bool;
+    }
+
+    function punchAdminCreateIsValid() {
+      return isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'employeeId',
+          'employeeName',
+          'type',
+          'storeId',
+          'latitude',
+          'longitude',
+          'accuracy',
+          'storeLatitude',
+          'storeLongitude',
+          'distanceMeters',
+          'radiusMeters',
+          'outOfRadius',
+          'justification',
+          'serverTime',
+          'edited',
+          'autoRegistered',
+          'manual',
+          'manualJustification',
+          'createdBy',
+          'createdByName',
+          'createdAt'
+        ]) &&
+        request.resource.data.employeeId is string &&
+        request.resource.data.employeeName is string &&
+        request.resource.data.type in ['entry', 'lunchOut', 'lunchIn', 'exit'] &&
+        request.resource.data.serverTime is timestamp &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.edited == false &&
+        request.resource.data.autoRegistered == false &&
+        request.resource.data.manual == true &&
+        request.resource.data.manualJustification is string &&
+        request.resource.data.manualJustification.size() > 0 &&
+        request.resource.data.createdBy == request.auth.uid;
+    }
+
+    function punchAdminUpdateIsValid() {
+      return isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'serverTime',
+          'type',
+          'edited',
+          'editJustification',
+          'editedBy',
+          'editedAt'
+        ]) &&
+        request.resource.data.type in ['entry', 'lunchOut', 'lunchIn', 'exit'] &&
+        request.resource.data.edited == true &&
+        request.resource.data.editJustification is string &&
+        request.resource.data.editJustification.size() > 0 &&
+        request.resource.data.editedBy == request.auth.uid &&
+        request.resource.data.editedAt == request.time;
+    }
+
+    match /system/{docId} {
+      allow read: if docId in ['setup', 'appUpdate', 'appConfig'];
+      allow create: if docId == 'setup' &&
+        signedIn() &&
+        setupMissing() &&
+        request.resource.data.firstAdminCreated == true &&
+        request.resource.data.firstAdminId == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create: if firstAdminCreate(userId) || (isAdmin() && userFieldsAreValid());
+      allow update: if isAdmin() || profilePhotoUpdateIsValid(userId);
+      allow delete: if isAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /punches/{punchId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.employeeId == request.auth.uid);
+      allow create: if punchCreateIsValid() || punchAdminCreateIsValid();
+      allow update: if punchAdminUpdateIsValid();
+      allow delete: if isAdmin();
+    }
+
+    match /changeLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /pinCredentials/{userId} {
+      allow read, write: if false;
+    }
+
+    match /overtimeApprovals/{approvalId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.employeeId == request.auth.uid);
+      allow create: if isAdmin() && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}
