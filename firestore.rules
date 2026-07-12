@@ -84,12 +84,23 @@ service cloud.firestore {
         request.resource.data.edited == false &&
         request.resource.data.autoRegistered is bool &&
         (!request.resource.data.autoRegistered || request.resource.data.type == 'exit') &&
+        request.resource.data.latitude is number &&
+        request.resource.data.longitude is number &&
+        request.resource.data.storeLatitude is number &&
+        request.resource.data.storeLongitude is number &&
+        request.resource.data.distanceMeters is number &&
+        request.resource.data.distanceMeters >= 0 &&
+        request.resource.data.radiusMeters is number &&
+        request.resource.data.radiusMeters >= 0 &&
         request.resource.data.outOfRadius is bool &&
+        request.resource.data.outOfRadius ==
+          (request.resource.data.distanceMeters > request.resource.data.radiusMeters) &&
         (
           request.resource.data.outOfRadius == false ||
           (
             request.resource.data.justification is string &&
-            request.resource.data.justification.size() > 0
+            request.resource.data.justification.size() > 0 &&
+            request.resource.data.justification.size() <= 500
           )
         );
     }
@@ -129,6 +140,7 @@ service cloud.firestore {
         request.resource.data.manual == true &&
         request.resource.data.manualJustification is string &&
         request.resource.data.manualJustification.size() > 0 &&
+        request.resource.data.manualJustification.size() <= 1000 &&
         request.resource.data.createdBy == request.auth.uid;
     }
 
@@ -146,8 +158,44 @@ service cloud.firestore {
         request.resource.data.edited == true &&
         request.resource.data.editJustification is string &&
         request.resource.data.editJustification.size() > 0 &&
+        request.resource.data.editJustification.size() <= 1000 &&
         request.resource.data.editedBy == request.auth.uid &&
         request.resource.data.editedAt == request.time;
+    }
+
+    function overtimeApprovalCreateIsValid() {
+      return isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'employeeId',
+          'weekStart',
+          'paymentDate',
+          'minutes',
+          'hourlyRate',
+          'amount',
+          'justification',
+          'approvedBy',
+          'approvedByName',
+          'status',
+          'createdAt'
+        ]) &&
+        request.resource.data.employeeId is string &&
+        request.resource.data.employeeId.size() > 0 &&
+        request.resource.data.weekStart is timestamp &&
+        request.resource.data.paymentDate is timestamp &&
+        request.resource.data.minutes is int &&
+        request.resource.data.minutes >= 0 &&
+        request.resource.data.minutes <= 100000 &&
+        request.resource.data.hourlyRate is number &&
+        request.resource.data.hourlyRate >= 0 &&
+        request.resource.data.amount is number &&
+        request.resource.data.amount >= 0 &&
+        request.resource.data.justification is string &&
+        request.resource.data.justification.size() > 0 &&
+        request.resource.data.justification.size() <= 1000 &&
+        request.resource.data.approvedBy == request.auth.uid &&
+        request.resource.data.approvedByName is string &&
+        request.resource.data.status == 'approved' &&
+        request.resource.data.createdAt == request.time;
     }
 
     match /system/{docId} {
@@ -192,7 +240,7 @@ service cloud.firestore {
 
     match /overtimeApprovals/{approvalId} {
       allow read: if isAdmin() || (signedIn() && resource.data.employeeId == request.auth.uid);
-      allow create: if isAdmin() && request.resource.data.createdAt == request.time;
+      allow create: if overtimeApprovalCreateIsValid();
       allow update, delete: if false;
     }
   }
