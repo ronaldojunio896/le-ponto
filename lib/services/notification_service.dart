@@ -48,10 +48,11 @@ class NotificationService {
   }) {
     return _show(
       id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      channelId: 'admin_punch_alert',
+      channelId: 'admin_punch_alert_v2',
       channelName: 'Pontos dos funcionarios',
       title: '$employeeName bateu ponto',
       body: punchLabel,
+      soundName: 'punch_alert',
     );
   }
 
@@ -62,10 +63,12 @@ class NotificationService {
   }) {
     return _show(
       id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      channelId: 'overtime_approval',
+      channelId: 'overtime_approval_v2',
       channelName: 'Horas extras aprovadas',
       title: 'Horas extras aprovadas',
-      body: '$minutesText aprovados. Pagamento previsto: $paymentDateText ($amountText).',
+      body:
+          '$minutesText aprovados. Pagamento previsto: $paymentDateText ($amountText).',
+      soundName: 'overtime_approval',
     );
   }
 
@@ -74,18 +77,21 @@ class NotificationService {
       id: 4,
       channelId: 'app_update',
       channelName: 'Atualizacoes do app',
-      title: requiredUpdate ? 'Atualizacao obrigatoria' : 'Atualizacao disponivel',
+      title:
+          requiredUpdate ? 'Atualizacao obrigatoria' : 'Atualizacao disponivel',
       body: requiredUpdate
           ? 'Baixe a nova versao do Le Ponto para continuar usando.'
           : 'Nova versao do Le Ponto disponivel para baixar.',
     );
   }
+
   Future<void> _show({
     required int id,
     required String channelId,
     required String channelName,
     required String title,
     required String body,
+    String? soundName,
   }) {
     if (kIsWeb) return Future.value();
     final android = AndroidNotificationDetails(
@@ -93,6 +99,10 @@ class NotificationService {
       channelName,
       importance: Importance.high,
       priority: Priority.high,
+      sound: soundName == null
+          ? null
+          : RawResourceAndroidNotificationSound(soundName),
+      playSound: true,
     );
     return _plugin.show(
       id,
