@@ -7,7 +7,8 @@ plugins {
 
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("key.properties")
-if (keystorePropertiesFile.exists()) {
+def releaseKeystoreConfigured = keystorePropertiesFile.exists()
+if (releaseKeystoreConfigured) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
@@ -47,7 +48,10 @@ android {
 
     buildTypes {
         release {
-            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            if (!releaseKeystoreConfigured) {
+                throw new GradleException("Missing android/key.properties. Release APKs must use the official signing key.")
+            }
+            signingConfig = signingConfigs.release
             minifyEnabled false
             shrinkResources false
         }
