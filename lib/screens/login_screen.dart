@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
@@ -28,12 +29,12 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submit() async {
     setState(() => _loading = true);
     try {
-      await context.read<AuthService>().signInWithEmail(_email.text, _password.text);
+      await context
+          .read<AuthService>()
+          .signInWithEmail(_email.text, _password.text);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel entrar: $error')),
-      );
+      await _showLoginError('Nao foi possivel entrar', error);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -45,9 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await context.read<AuthService>().signInWithGoogle();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nao foi possivel entrar com Google: $error')),
-      );
+      await _showLoginError('Nao foi possivel entrar com Google', error);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -59,7 +58,8 @@ class _LoginScreenState extends State<LoginScreen> {
       await context.read<AuthService>().sendPasswordReset(_email.text);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link de senha enviado para o e-mail informado.')),
+        const SnackBar(
+            content: Text('Link de senha enviado para o e-mail informado.')),
       );
     } catch (error) {
       if (!mounted) return;
@@ -87,6 +87,22 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _showLoginError(String title, Object error) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(error.toString()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -120,7 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
       FilledButton.icon(
         onPressed: _loading ? null : _submit,
         icon: _loading
-            ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox.square(
+                dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.login),
         label: const Text('Entrar'),
       ),
@@ -179,7 +196,8 @@ class _LoginScreenState extends State<LoginScreen> {
       FilledButton.icon(
         onPressed: _loading ? null : _createFirstAdmin,
         icon: _loading
-            ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox.square(
+                dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.admin_panel_settings),
         label: const Text('Criar admin'),
       ),
@@ -219,6 +237,21 @@ class _LoginShell extends StatelessWidget {
                   const Text('Le Racoes', textAlign: TextAlign.center),
                   const SizedBox(height: 32),
                   ...children,
+                  const SizedBox(height: 24),
+                  FutureBuilder<PackageInfo>(
+                    future: PackageInfo.fromPlatform(),
+                    builder: (context, snapshot) {
+                      final info = snapshot.data;
+                      final text = info == null
+                          ? 'Versao do app'
+                          : 'Versao ${info.version} (${info.buildNumber})';
+                      return Text(
+                        text,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      );
+                    },
+                  ),
                 ],
               ),
             ),

@@ -19,8 +19,13 @@ class AuthService {
 
   Stream<User?> authStateChanges() => _auth.authStateChanges();
 
-  Future<void> signInWithEmail(String email, String password) {
-    return _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
+  Future<void> signInWithEmail(String email, String password) async {
+    try {
+      await _auth.signInWithEmailAndPassword(
+          email: email.trim(), password: password);
+    } on FirebaseAuthException catch (error) {
+      throw Exception(_firebaseAuthMessage(error));
+    }
   }
 
   Future<void> sendPasswordReset(String email) {
@@ -36,24 +41,29 @@ class AuthService {
       clientId: kIsWeb
           ? '957258916239-hjrfuck4f8n5ailv1ql4rsvvnjrvpki8.apps.googleusercontent.com'
           : null,
+      scopes: const ['email'],
     );
   }
 
   Future<void> signInWithGoogle() async {
     final UserCredential userCredential;
-    if (kIsWeb) {
-      final provider = GoogleAuthProvider()..addScope('email');
-      userCredential = await _auth.signInWithPopup(provider);
-    } else {
-      final googleUser = await _googleSignIn().signIn();
-      if (googleUser == null) return;
+    try {
+      if (kIsWeb) {
+        final provider = GoogleAuthProvider()..addScope('email');
+        userCredential = await _auth.signInWithPopup(provider);
+      } else {
+        final googleUser = await _googleSignIn().signIn();
+        if (googleUser == null) return;
 
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      userCredential = await _auth.signInWithCredential(credential);
+        final googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+        userCredential = await _auth.signInWithCredential(credential);
+      }
+    } on FirebaseAuthException catch (error) {
+      throw Exception(_firebaseAuthMessage(error));
     }
     final user = userCredential.user;
     if (user == null) throw Exception('Nao foi possivel entrar com Google.');
@@ -113,7 +123,9 @@ class AuthService {
       password: password,
     );
     final user = credential.user;
-    if (user == null) throw Exception('Nao foi possivel criar o administrador.');
+    if (user == null) {
+      throw Exception('Nao foi possivel criar o administrador.');
+    }
     await user.updateDisplayName(name.trim());
 
     final batch = _firestore.batch();
@@ -190,6 +202,26 @@ class AuthService {
       if (!doc.exists) return null;
       return AppUser.fromDoc(doc);
     });
+  }
+
+  String _firebaseAuthMessage(FirebaseAuthException error) {
+    final code = error.code;
+    final message = switch (code) {
+      'invalid-email' => 'E-mail invalido.',
+      'user-disabled' => 'Esta conta foi desativada.',
+      'user-not-found' => 'Usuario nao encontrado.',
+      'wrong-password' => 'E-mail ou senha incorretos.',
+      'invalid-credential' => 'E-mail ou senha incorretos.',
+      'network-request-failed' => 'Falha de internet no celular.',
+      'too-many-requests' =>
+        'Muitas tentativas. Aguarde um pouco e tente de novo.',
+      'operation-not-allowed' =>
+        'Este metodo de login nao esta liberado no Firebase.',
+      'api-key-not-valid' => 'Chave do Firebase invalida neste APK.',
+      'app-not-authorized' => 'Este APK nao esta autorizado no Firebase.',
+      _ => error.message ?? 'Erro de autenticacao.',
+    };
+    return '$message Codigo: $code';
   }
 
   Future<void> signOut() async {

@@ -1,7 +1,7 @@
 name: le_ponto
 description: Aplicativo Android de controle de ponto da loja Le Racoes.
 publish_to: "none"
-version: 1.0.2+10
+version: 1.0.3+11
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
