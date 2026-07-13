@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 
@@ -37,10 +38,11 @@ class AuthService {
   }
 
   GoogleSignIn _googleSignIn() {
+    const webClientId =
+        '957258916239-hjrfuck4f8n5ailv1ql4rsvvnjrvpki8.apps.googleusercontent.com';
     return GoogleSignIn(
-      clientId: kIsWeb
-          ? '957258916239-hjrfuck4f8n5ailv1ql4rsvvnjrvpki8.apps.googleusercontent.com'
-          : null,
+      clientId: kIsWeb ? webClientId : null,
+      serverClientId: kIsWeb ? null : webClientId,
       scopes: const ['email'],
     );
   }
@@ -64,6 +66,8 @@ class AuthService {
       }
     } on FirebaseAuthException catch (error) {
       throw Exception(_firebaseAuthMessage(error));
+    } on PlatformException catch (error) {
+      throw Exception(_googleSignInMessage(error));
     }
     final user = userCredential.user;
     if (user == null) throw Exception('Nao foi possivel entrar com Google.');
@@ -222,6 +226,14 @@ class AuthService {
       _ => error.message ?? 'Erro de autenticacao.',
     };
     return '$message Codigo: $code';
+  }
+
+  String _googleSignInMessage(PlatformException error) {
+    final details = '${error.message ?? ''} ${error.details ?? ''}';
+    if (details.contains('ApiException: 10')) {
+      return 'Erro de configuracao do Google Sign-In neste APK. Codigo: google-api-10';
+    }
+    return '${error.message ?? 'Erro ao entrar com Google.'} Codigo: ${error.code}';
   }
 
   Future<void> signOut() async {
