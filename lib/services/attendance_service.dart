@@ -17,13 +17,18 @@ class AttendanceService {
   final AppConfigService _config;
 
   Stream<StoreConfig?> watchStore() {
-    return _firestore.collection('stores').doc('le-racoes-sao-gabriel').snapshots().map((doc) {
+    return _firestore
+        .collection('stores')
+        .doc('le-racoes-sao-gabriel')
+        .snapshots()
+        .map((doc) {
       if (!doc.exists) return null;
       return StoreConfig.fromDoc(doc);
     });
   }
 
-  Stream<List<Punch>> watchPunchesForUser(String userId, DateTime start, DateTime end) {
+  Stream<List<Punch>> watchPunchesForUser(
+      String userId, DateTime start, DateTime end) {
     return _firestore
         .collection('punches')
         .where('employeeId', isEqualTo: userId)
@@ -61,20 +66,30 @@ class AttendanceService {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Login obrigatorio.');
     final config = await _config.currentConfig();
+    final now = DateTime.now();
+    final todayStart = WorkdaySummary.dayStart(now);
 
     await _ensurePunchSequence(
       user.uid,
       type,
+      now: now,
       duplicateWindowSeconds: config.duplicatePunchWindowSeconds,
       config: config,
     );
 
-    final storeDoc = await _firestore.collection('stores').doc('le-racoes-sao-gabriel').get();
-    if (!storeDoc.exists) throw Exception('Loja nao cadastrada.');
+    final storeDoc = await _firestore
+        .collection('stores')
+        .doc('le-racoes-sao-gabriel')
+        .get();
+    if (!storeDoc.exists) {
+      throw Exception('Loja nao cadastrada.');
+    }
     final store = StoreConfig.fromDoc(storeDoc);
 
     final profileDoc = await _firestore.collection('users').doc(user.uid).get();
-    if (!profileDoc.exists) throw Exception('Perfil do usuario nao encontrado.');
+    if (!profileDoc.exists) {
+      throw Exception('Perfil do usuario nao encontrado.');
+    }
     final profile = profileDoc.data() ?? {};
     if (profile['active'] != true) {
       throw Exception('Conta inativa. Procure a administracao da loja.');
@@ -89,11 +104,12 @@ class AttendanceService {
     );
     final outOfRadius = distanceMeters > store.radiusMeters;
     final cleanJustification = justification?.trim();
-    if (outOfRadius && (cleanJustification == null || cleanJustification.isEmpty)) {
+    if (outOfRadius &&
+        (cleanJustification == null || cleanJustification.isEmpty)) {
       throw Exception('Ponto fora do raio permitido. Informe justificativa.');
     }
 
-    await _firestore.collection('punches').add({
+    final punchData = {
       'employeeId': user.uid,
       'employeeName': profile['name'] as String? ?? user.email ?? '',
       'type': type.name,
@@ -106,11 +122,23 @@ class AttendanceService {
       'distanceMeters': distanceMeters,
       'radiusMeters': store.radiusMeters,
       'outOfRadius': outOfRadius,
-      'justification': cleanJustification?.isEmpty == true ? null : cleanJustification,
+      'justification':
+          cleanJustification?.isEmpty == true ? null : cleanJustification,
       'serverTime': FieldValue.serverTimestamp(),
       'edited': false,
       'autoRegistered': autoRegistered,
       'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    final punchRef = _firestore
+        .collection('punches')
+        .doc(_punchDocId(user.uid, todayStart, type));
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(punchRef);
+      if (existing.exists) {
+        throw Exception('Ponto duplicado ignorado. Aguarde alguns segundos.');
+      }
+      transaction.set(punchRef, punchData);
     });
   }
 
@@ -133,7 +161,10 @@ class AttendanceService {
       throw Exception('Somente admin ativo pode cadastrar ponto manual.');
     }
 
-    final storeDoc = await _firestore.collection('stores').doc('le-racoes-sao-gabriel').get();
+    final storeDoc = await _firestore
+        .collection('stores')
+        .doc('le-racoes-sao-gabriel')
+        .get();
     final store = storeDoc.exists ? StoreConfig.fromDoc(storeDoc) : null;
 
     await _firestore.collection('punches').add({
@@ -259,11 +290,25 @@ class AttendanceService {
     if (justification.trim().isEmpty) {
       throw Exception('Justificativa obrigatoria.');
     }
+    if (minutes < 0) {
+      throw Exception('Minutos aprovados invalidos.');
+    }
+    if (hourlyRate <= 0) {
+      throw Exception('Valor por hora invalido.');
+    }
     final adminDoc = await _firestore.collection('users').doc(admin.uid).get();
     final adminData = adminDoc.data() ?? {};
-    await _firestore.collection('overtimeApprovals').add({
+    if (adminData['role'] != 'admin' || adminData['active'] != true) {
+      throw Exception('Somente admin ativo pode aprovar horas extras.');
+    }
+
+    final safeWeekStart = WorkdaySummary.paymentWeekStart(weekStart);
+    final approvalRef = _firestore
+        .collection('overtimeApprovals')
+        .doc(_approvalDocId(employeeId, safeWeekStart));
+    final approvalData = {
       'employeeId': employeeId,
-      'weekStart': Timestamp.fromDate(weekStart),
+      'weekStart': Timestamp.fromDate(safeWeekStart),
       'paymentDate': Timestamp.fromDate(paymentDate),
       'minutes': minutes,
       'hourlyRate': hourlyRate,
@@ -273,16 +318,23 @@ class AttendanceService {
       'approvedByName': adminData['name'] as String? ?? admin.email ?? '',
       'status': 'approved',
       'createdAt': FieldValue.serverTimestamp(),
+    };
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(approvalRef);
+      if (existing.exists) {
+        throw Exception('Horas extras desta semana ja foram aprovadas.');
+      }
+      transaction.set(approvalRef, approvalData);
     });
   }
 
   Future<void> _ensurePunchSequence(
     String userId,
     PunchType type, {
+    required DateTime now,
     required int duplicateWindowSeconds,
     required RemoteAppConfig config,
   }) async {
-    final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day);
     final end = start.add(const Duration(days: 1));
     final snapshot = await _firestore
@@ -296,15 +348,35 @@ class AttendanceService {
     final punches = snapshot.docs.map(Punch.fromDoc).toList();
     final duplicateWindow = Duration(seconds: duplicateWindowSeconds);
     for (final punch in punches) {
-      if (punch.type == type && now.difference(punch.serverTime).abs() <= duplicateWindow) {
+      if (punch.type == type &&
+          now.difference(punch.serverTime).abs() <= duplicateWindow) {
         throw Exception('Ponto duplicado ignorado. Aguarde alguns segundos.');
       }
     }
 
-    final summary = WorkdaySummary(day: start, punches: punches, config: config);
+    final summary =
+        WorkdaySummary(day: start, punches: punches, config: config);
     if (summary.nextActions.contains(type)) {
       return;
     }
     throw Exception(summary.expectedActionMessage(type));
+  }
+
+  String _punchDocId(String userId, DateTime day, PunchType type) {
+    return '${_safeId(userId)}_${_dateKey(day)}_${type.name}';
+  }
+
+  String _approvalDocId(String employeeId, DateTime weekStart) {
+    return '${_safeId(employeeId)}_${_dateKey(weekStart)}';
+  }
+
+  String _safeId(String value) {
+    return value.replaceAll(RegExp(r'[/\\]'), '_');
+  }
+
+  String _dateKey(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}'
+        '${date.month.toString().padLeft(2, '0')}'
+        '${date.day.toString().padLeft(2, '0')}';
   }
 }

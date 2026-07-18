@@ -7,7 +7,8 @@ class WorkdaySummary {
     required List<Punch> punches,
     RemoteAppConfig? config,
   })  : config = config ?? RemoteAppConfig.defaults(),
-        punches = [...punches]..sort((a, b) => a.serverTime.compareTo(b.serverTime));
+        punches = [...punches]
+          ..sort((a, b) => a.serverTime.compareTo(b.serverTime));
 
   static const startHour = 8;
   static const noLunchExitHour = 15;
@@ -24,8 +25,8 @@ class WorkdaySummary {
 
   DateTime get scheduledStart => _dateWithMinute(schedule.startMinute);
 
-  DateTime get scheduledExit =>
-      _dateWithMinute(hasLunch ? schedule.lunchExitMinute : schedule.noLunchExitMinute);
+  DateTime get scheduledExit => _dateWithMinute(
+      hasLunch ? schedule.lunchExitMinute : schedule.noLunchExitMinute);
 
   Punch? get entry => _first(PunchType.entry);
   Punch? get lunchOut => _first(PunchType.lunchOut);
@@ -55,13 +56,19 @@ class WorkdaySummary {
   }
 
   int projectedLateExitSeconds(DateTime now) {
-    if (exit != null || entry == null || now.isBefore(scheduledExit)) return 0;
+    if (WorkdaySummary.dayStart(now) != WorkdaySummary.dayStart(day)) {
+      return 0;
+    }
+    if (exit != null || entry == null || now.isBefore(scheduledExit)) {
+      return 0;
+    }
     return now.difference(scheduledExit).inSeconds;
   }
 
   int overtimeSeconds({DateTime? now}) {
-    final grossOvertime =
-        earlyArrivalSeconds + lateExitSeconds + projectedLateExitSeconds(now ?? DateTime.now());
+    final grossOvertime = earlyArrivalSeconds +
+        lateExitSeconds +
+        projectedLateExitSeconds(now ?? DateTime.now());
     final deductions = lateSeconds + earlyLeaveSeconds;
     final netOvertime = grossOvertime - deductions;
     return netOvertime < 0 ? 0 : netOvertime;
@@ -76,7 +83,8 @@ class WorkdaySummary {
 
     if (firstEntry == null) return 0;
     if (lunchStart != null) {
-      total += lunchStart.serverTime.difference(firstEntry.serverTime).inSeconds;
+      total +=
+          lunchStart.serverTime.difference(firstEntry.serverTime).inSeconds;
     } else if (finalExit != null) {
       total += finalExit.serverTime.difference(firstEntry.serverTime).inSeconds;
     }
@@ -118,24 +126,29 @@ class WorkdaySummary {
     return 'O proximo ponto esperado e $labels.';
   }
 
-  static DateTime dayStart(DateTime date) => DateTime(date.year, date.month, date.day);
+  static DateTime dayStart(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
 
-  static DateTime dayEnd(DateTime date) => dayStart(date).add(const Duration(days: 1));
+  static DateTime dayEnd(DateTime date) =>
+      dayStart(date).add(const Duration(days: 1));
 
   static DateTime paymentWeekStart(DateTime date) {
     final today = dayStart(date);
     return today.subtract(Duration(days: today.weekday % DateTime.daysPerWeek));
   }
 
-  static DateTime paymentWeekEnd(DateTime date) => paymentWeekStart(date).add(const Duration(days: 7));
+  static DateTime paymentWeekEnd(DateTime date) =>
+      paymentWeekStart(date).add(const Duration(days: 7));
 
   static int paymentWeekNumber(DateTime date) {
     final start = paymentWeekStart(date);
-    final diff = start.difference(paymentWeekBaseStart).inDays ~/ DateTime.daysPerWeek;
+    final diff =
+        start.difference(paymentWeekBaseStart).inDays ~/ DateTime.daysPerWeek;
     return paymentWeekBaseNumber + diff;
   }
 
-  static int configuredPaymentWeekNumber(DateTime date, RemoteAppConfig config) {
+  static int configuredPaymentWeekNumber(
+      DateTime date, RemoteAppConfig config) {
     final start = paymentWeekStart(date);
     final baseStart = paymentWeekStart(config.paymentWeekBaseStart);
     final diff = start.difference(baseStart).inDays ~/ DateTime.daysPerWeek;
@@ -162,8 +175,12 @@ String formatSeconds(int seconds, {bool compact = false}) {
   final minutes = (safe % 3600) ~/ 60;
   final remainingSeconds = safe % 60;
   if (compact) {
-    if (hours > 0) return '${hours}h ${minutes.toString().padLeft(2, '0')}min';
-    if (minutes > 0) return '${minutes}min ${remainingSeconds.toString().padLeft(2, '0')}s';
+    if (hours > 0) {
+      return '${hours}h ${minutes.toString().padLeft(2, '0')}min';
+    }
+    if (minutes > 0) {
+      return '${minutes}min ${remainingSeconds.toString().padLeft(2, '0')}s';
+    }
     return '${remainingSeconds}s';
   }
   return '${hours}h ${minutes.toString().padLeft(2, '0')}min ${remainingSeconds.toString().padLeft(2, '0')}s';

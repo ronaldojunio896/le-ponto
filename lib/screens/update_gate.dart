@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_update_config.dart';
@@ -36,6 +37,7 @@ class _UpdateGateState extends State<UpdateGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) return widget.child;
     final updates = context.watch<UpdateService>();
     return FutureBuilder<int>(
       future: _currentBuildFuture,
@@ -75,7 +77,8 @@ class _UpdateGateState extends State<UpdateGate> {
 }
 
 class _MandatoryUpdateScreen extends StatelessWidget {
-  const _MandatoryUpdateScreen({required this.config, required this.currentBuild});
+  const _MandatoryUpdateScreen(
+      {required this.config, required this.currentBuild});
 
   final AppUpdateConfig config;
   final int currentBuild;
@@ -124,7 +127,9 @@ class _MandatoryUpdateScreen extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: config.apkUrl.isEmpty
                         ? null
-                        : () => context.read<UpdateService>().openDownload(config.apkUrl),
+                        : () => context
+                            .read<UpdateService>()
+                            .openDownload(config.apkUrl),
                     icon: const Icon(Icons.download),
                     label: const Text('Baixar atualizacao'),
                   ),
@@ -183,7 +188,9 @@ class _OptionalUpdateBannerState extends State<_OptionalUpdateBanner> {
             TextButton(
               onPressed: widget.config.apkUrl.isEmpty
                   ? null
-                  : () => context.read<UpdateService>().openDownload(widget.config.apkUrl),
+                  : () => context
+                      .read<UpdateService>()
+                      .openDownload(widget.config.apkUrl),
               child: const Text('Baixar'),
             ),
             IconButton(

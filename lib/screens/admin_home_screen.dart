@@ -16,6 +16,7 @@ import '../services/attendance_service.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../services/report_service.dart';
+import '../widgets/app_credits.dart';
 import '../widgets/user_avatar.dart';
 
 class AdminHomeScreen extends StatefulWidget {
@@ -81,6 +82,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       appBar: AppBar(
         title: const Text('Admin - Le Ponto'),
         actions: [
+          IconButton(
+            tooltip: 'Creditos',
+            onPressed: () => showAppCreditsDialog(context),
+            icon: const Icon(Icons.info_outline),
+          ),
           IconButton(
             tooltip: 'Sair',
             onPressed: context.read<AuthService>().signOut,
@@ -1037,6 +1043,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                           _selected!,
                           weekStart,
                           summary.overtimeMinutes,
+                          hourlyRate,
                         ),
                         icon: const Icon(Icons.verified),
                         label: const Text('Aprovar horas extras'),
@@ -1056,6 +1063,7 @@ class _ReportsTabState extends State<_ReportsTab> {
     AppUser user,
     DateTime weekStart,
     int suggestedMinutes,
+    double hourlyRate,
   ) {
     final minutes = TextEditingController(text: suggestedMinutes.toString());
     final justification = TextEditingController();
@@ -1113,7 +1121,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                       weekStart: weekStart,
                       paymentDate: paymentDate,
                       minutes: int.tryParse(minutes.text) ?? 0,
-                      hourlyRate: user.hourlyRate,
+                      hourlyRate: hourlyRate,
                       justification: justification.text,
                     );
                 if (!context.mounted) return;
@@ -1231,9 +1239,9 @@ class _StoreTabState extends State<_StoreTab> {
                     'name': 'Le Racoes',
                     'address':
                         'R. Anapurus, 242 - Lj 03 - Sao Gabriel, Belo Horizonte - MG, 31980-140',
-                    'latitude': -19.8587,
-                    'longitude': -43.9248,
-                    'radiusMeters': 40,
+                    'latitude': -19.855833,
+                    'longitude': -43.918139,
+                    'radiusMeters': 30,
                     'coordinateNeedsReview': true,
                     'updatedAt': FieldValue.serverTimestamp(),
                   }, SetOptions(merge: true));
@@ -1248,7 +1256,7 @@ class _StoreTabState extends State<_StoreTab> {
         if (!_loaded) {
           _latitude.text = store.latitude.toStringAsFixed(6);
           _longitude.text = store.longitude.toStringAsFixed(6);
-          _radius = store.radiusMeters.clamp(30, 60).toDouble();
+          _radius = store.radiusMeters.clamp(10, 80).toDouble();
           _loaded = true;
         }
         return ListView(
@@ -1274,9 +1282,9 @@ class _StoreTabState extends State<_StoreTab> {
             const SizedBox(height: 18),
             Text('Raio permitido: ${_radius.round()} m'),
             Slider(
-              min: 30,
-              max: 60,
-              divisions: 30,
+              min: 10,
+              max: 80,
+              divisions: 70,
               value: _radius,
               label: '${_radius.round()} m',
               onChanged: (value) => setState(() => _radius = value),

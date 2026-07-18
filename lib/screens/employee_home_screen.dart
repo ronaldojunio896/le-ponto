@@ -8,12 +8,14 @@ import 'package:provider/provider.dart';
 import '../models/app_user.dart';
 import '../models/punch.dart';
 import '../models/remote_app_config.dart';
+import '../models/weekly_summary.dart';
 import '../models/workday_summary.dart';
 import '../services/app_config_service.dart';
 import '../services/attendance_service.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/app_credits.dart';
 import '../widgets/user_avatar.dart';
 
 class EmployeeHomeScreen extends StatefulWidget {
@@ -34,6 +36,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
   late DateTime _weekEnd;
   bool _nearStoreNotified = false;
   bool _autoExitInProgress = false;
+  int _autoExitCandidateCount = 0;
   DateTime? _departureNotifiedForDay;
   StreamSubscription? _locationSub;
   StreamSubscription? _approvalSub;
@@ -105,7 +108,15 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       if (distance > store.radiusMeters + 80) {
         _nearStoreNotified = false;
       }
-      if (distance >= config.autoExitDistanceMeters) {
+      final confirmedDistance = distance - position.accuracy;
+      final reliableReading = position.accuracy <= 40;
+      if (reliableReading &&
+          confirmedDistance >= config.autoExitDistanceMeters) {
+        _autoExitCandidateCount += 1;
+      } else {
+        _autoExitCandidateCount = 0;
+      }
+      if (_autoExitCandidateCount >= 2) {
         await _tryAutoExit(distance);
       }
     });
@@ -136,7 +147,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         final paymentDateText = paymentDate is Timestamp
             ? DateFormat('dd/MM/yyyy', 'pt_BR').format(paymentDate.toDate())
             : 'data informada';
-        final amountText = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(amount);
+        final amountText = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$')
+            .format(amount);
         final minutesText = formatSeconds(minutes * 60, compact: true);
         notification.showOvertimeApprovalAlert(
           paymentDateText: paymentDateText,
@@ -159,7 +171,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
           .watchPunchesForUser(
               widget.user.id, todayStart, WorkdaySummary.dayEnd(todayStart))
           .first;
-      final summary = WorkdaySummary(day: todayStart, punches: punches, config: config);
+      final summary =
+          WorkdaySummary(day: todayStart, punches: punches, config: config);
       if (!summary.canAutoExit) return;
       await attendance.registerPunch(
         PunchType.exit,
@@ -167,12 +180,14 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             'Saida automatica ao sair de ${distanceMeters.toStringAsFixed(0)} m da loja.',
         autoRegistered: true,
       );
+      _autoExitCandidateCount = 0;
       await Future<void>.delayed(const Duration(seconds: 1));
       final updated = await attendance
           .watchPunchesForUser(
               widget.user.id, todayStart, WorkdaySummary.dayEnd(todayStart))
           .first;
-      final updatedSummary = WorkdaySummary(day: todayStart, punches: updated, config: config);
+      final updatedSummary =
+          WorkdaySummary(day: todayStart, punches: updated, config: config);
       final overtime =
           formatSeconds(updatedSummary.overtimeSeconds(), compact: true);
       notification.showAutoExitPrompt(overtime);
@@ -197,7 +212,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
           .first;
       if (!mounted) return;
       final config = await context.read<AppConfigService>().currentConfig();
-      final summary = WorkdaySummary(day: todayStart, punches: punches, config: config);
+      final summary =
+          WorkdaySummary(day: todayStart, punches: punches, config: config);
       if (summary.entry != null &&
           !summary.isClosed &&
           !summary.onLunch &&
@@ -262,7 +278,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
         .first;
     if (!mounted) return;
     final config = await context.read<AppConfigService>().currentConfig();
-    _showExitComplete(WorkdaySummary(day: todayStart, punches: punches, config: config));
+    _showExitComplete(
+        WorkdaySummary(day: todayStart, punches: punches, config: config));
   }
 
   Future<void> _showExitComplete(WorkdaySummary summary) {
@@ -362,11 +379,17 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       stream: configService.watchConfig(),
       builder: (context, configSnapshot) {
         final config = configSnapshot.data ?? RemoteAppConfig.defaults();
-        final weekNumber = WorkdaySummary.configuredPaymentWeekNumber(DateTime.now(), config);
+        final weekNumber =
+            WorkdaySummary.configuredPaymentWeekNumber(DateTime.now(), config);
         return Scaffold(
           appBar: AppBar(
             title: const Text('Le Ponto'),
             actions: [
+              IconButton(
+                tooltip: 'Creditos',
+                onPressed: () => showAppCreditsDialog(context),
+                icon: const Icon(Icons.info_outline),
+              ),
               IconButton(
                 tooltip: 'Sair',
                 onPressed: context.read<AuthService>().signOut,
@@ -385,7 +408,8 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
               const SizedBox(height: 16),
               const _ClockCard(),
               const SizedBox(height: 16),
-              _WeeklyRanking(
+              _EmployeeWeeklySummary(
+                user: widget.user,
                 weekStart: _weekStart,
                 weekEnd: _weekEnd,
                 weekNumber: weekNumber,
@@ -702,14 +726,16 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-class _WeeklyRanking extends StatelessWidget {
-  const _WeeklyRanking({
+class _EmployeeWeeklySummary extends StatelessWidget {
+  const _EmployeeWeeklySummary({
+    required this.user,
     required this.weekStart,
     required this.weekEnd,
     required this.weekNumber,
     required this.config,
   });
 
+  final AppUser user;
   final DateTime weekStart;
   final DateTime weekEnd;
   final int weekNumber;
@@ -718,132 +744,67 @@ class _WeeklyRanking extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final attendance = context.watch<AttendanceService>();
-    final firestore = context.watch<FirebaseFirestore>();
+    final hourlyRate =
+        user.hourlyRate <= 0 ? config.hourlyRateDefault : user.hourlyRate;
+    final money = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     return StreamBuilder<List<Punch>>(
-      stream: attendance.watchAllPunches(weekStart, weekEnd),
-      builder: (context, punchSnapshot) {
-        final punches = punchSnapshot.data ?? [];
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: firestore.collection('users').orderBy('name').snapshots(),
-          builder: (context, userSnapshot) {
-            final users = (userSnapshot.data?.docs ?? [])
-                .map(AppUser.fromDoc)
-                .where((user) => !user.isAdmin && user.active)
-                .toList();
-            final rows = users.map((user) {
-              final userPunches = punches
-                  .where((punch) => punch.employeeId == user.id)
-                  .toList();
-              return _RankingRowData(
-                user: user,
-                overtimeSeconds: _weekOvertime(userPunches, config),
-              );
-            }).toList()
-              ..sort((a, b) => b.overtimeSeconds.compareTo(a.overtimeSeconds));
-            final maxSeconds =
-                rows.isEmpty ? 1 : rows.first.overtimeSeconds.clamp(1, 1 << 31);
-            return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.leaderboard),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Ranking semana $weekNumber',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (rows.isEmpty)
-                      const Text('Nenhum funcionario ativo.')
-                    else
-                      ...rows.take(5).map((row) =>
-                          _RankingBar(row: row, maxSeconds: maxSeconds)),
-                  ],
-                ),
-              ),
-            );
-          },
+      stream: attendance.watchPunchesForUser(user.id, weekStart, weekEnd),
+      builder: (context, snapshot) {
+        final punches = snapshot.data ?? [];
+        final summary = WeeklySummary.fromPunches(
+          punches,
+          hourlyRate,
+          config: config,
         );
-      },
-    );
-  }
-
-  int _weekOvertime(List<Punch> punches, RemoteAppConfig config) {
-    final byDay = <DateTime, List<Punch>>{};
-    for (final punch in punches) {
-      final day = WorkdaySummary.dayStart(punch.serverTime);
-      byDay.putIfAbsent(day, () => []).add(punch);
-    }
-    var total = 0;
-    for (final entry in byDay.entries) {
-      total += WorkdaySummary(day: entry.key, punches: entry.value, config: config)
-          .overtimeSeconds();
-    }
-    return total;
-  }
-}
-
-class _RankingBar extends StatelessWidget {
-  const _RankingBar({required this.row, required this.maxSeconds});
-
-  final _RankingRowData row;
-  final int maxSeconds;
-
-  @override
-  Widget build(BuildContext context) {
-    final factor =
-        row.overtimeSeconds == 0 ? 0.04 : row.overtimeSeconds / maxSeconds;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          UserAvatar(
-              name: row.user.name,
-              photoBase64: row.user.photoBase64,
-              radius: 18),
-          const SizedBox(width: 10),
-          Expanded(
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
+                    const Icon(Icons.summarize),
+                    const SizedBox(width: 8),
                     Expanded(
-                        child: Text(row.user.name,
-                            overflow: TextOverflow.ellipsis)),
-                    Text(formatSeconds(row.overtimeSeconds, compact: true)),
+                      child: Text(
+                        'Minha semana $weekNumber',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 5),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    minHeight: 8,
-                    value: factor.clamp(0.04, 1).toDouble(),
+                const SizedBox(height: 12),
+                _MetricTile(
+                  icon: Icons.add_alarm,
+                  label: 'Extras liquidas',
+                  value: formatSeconds(
+                    summary.overtimeMinutes * 60,
+                    compact: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _MetricTile(
+                  icon: Icons.payments,
+                  label: 'Valor estimado',
+                  value: money.format(summary.amountToPay),
+                ),
+                const SizedBox(height: 8),
+                _MetricTile(
+                  icon: Icons.schedule,
+                  label: 'Atrasos',
+                  value: formatSeconds(
+                    summary.lateMinutes * 60,
+                    compact: true,
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
-}
-
-class _RankingRowData {
-  const _RankingRowData({required this.user, required this.overtimeSeconds});
-
-  final AppUser user;
-  final int overtimeSeconds;
 }
 
 class _PunchList extends StatelessWidget {

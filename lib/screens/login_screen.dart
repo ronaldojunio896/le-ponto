@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../services/auth_service.dart';
+import '../widgets/app_credits.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -252,6 +253,8 @@ class _LoginShell extends StatelessWidget {
                       );
                     },
                   ),
+                  const SizedBox(height: 8),
+                  const AppCreditsLine(),
                 ],
               ),
             ),
