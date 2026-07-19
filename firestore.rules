@@ -58,7 +58,6 @@ service cloud.firestore {
 
     function punchCreateIsValid() {
       return signedIn() &&
-        userDoc().data.active == true &&
         request.resource.data.keys().hasOnly([
           'employeeId',
           'employeeName',
@@ -79,8 +78,6 @@ service cloud.firestore {
           'createdAt'
         ]) &&
         request.resource.data.employeeId == request.auth.uid &&
-        request.resource.data.employeeName is string &&
-        request.resource.data.employeeName.size() > 0 &&
         request.resource.data.type in ['entry', 'lunchOut', 'lunchIn', 'exit'] &&
         request.resource.data.serverTime == request.time &&
         request.resource.data.createdAt == request.time &&
@@ -202,8 +199,7 @@ service cloud.firestore {
     }
 
     match /system/{docId} {
-      allow read: if docId in ['setup', 'appUpdate'] ||
-        (docId == 'appConfig' && signedIn());
+      allow read: if docId in ['setup', 'appUpdate', 'appConfig'];
       allow create: if docId == 'setup' &&
         signedIn() &&
         setupMissing() &&
