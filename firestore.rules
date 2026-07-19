@@ -198,6 +198,24 @@ service cloud.firestore {
         request.resource.data.createdAt == request.time;
     }
 
+    function ownGeneratedPunchId(punchId) {
+      return signedIn() &&
+        punchId.matches(request.auth.uid + '_[0-9]{8}_(entry|lunchOut|lunchIn|exit)');
+    }
+
+    function punchGetIsValid(punchId) {
+      return isAdmin() ||
+        (
+          signedIn() &&
+          (
+            (exists(/databases/$(database)/documents/punches/$(punchId)) &&
+              resource.data.employeeId == request.auth.uid) ||
+            (!exists(/databases/$(database)/documents/punches/$(punchId)) &&
+              ownGeneratedPunchId(punchId))
+          )
+        );
+    }
+
     match /system/{docId} {
       allow read: if docId in ['setup', 'appUpdate', 'appConfig'];
       allow create: if docId == 'setup' &&
@@ -222,7 +240,8 @@ service cloud.firestore {
     }
 
     match /punches/{punchId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.employeeId == request.auth.uid);
+      allow get: if punchGetIsValid(punchId);
+      allow list: if isAdmin() || (signedIn() && resource.data.employeeId == request.auth.uid);
       allow create: if punchCreateIsValid() || punchAdminCreateIsValid();
       allow update: if punchAdminUpdateIsValid();
       allow delete: if isAdmin();
